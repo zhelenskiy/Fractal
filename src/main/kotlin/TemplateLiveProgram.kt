@@ -1,6 +1,7 @@
 import org.openrndr.application
 import org.openrndr.color.ColorRGBa
 import org.openrndr.extra.olive.oliveProgram
+import org.openrndr.math.Vector2
 
 /**
  *  This is a template for a live program.
@@ -17,6 +18,9 @@ fun main() = application {
     oliveProgram {
         extend {
             drawer.clear(ColorRGBa.PINK)
+            simpleFractal(6, Vector2(0.0, height * 1.0 / 3), Vector2(width.toDouble(), height * 1.0 / 3))
+//            drawLandscape()
         }
     }
 }
+

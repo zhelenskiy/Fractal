@@ -1,31 +1,54 @@
 import org.openrndr.application
-import org.openrndr.color.ColorRGBa
-import org.openrndr.draw.loadFont
-import org.openrndr.draw.loadImage
-import org.openrndr.draw.tint
-import kotlin.math.cos
-import kotlin.math.sin
+import org.openrndr.ffmpeg.ScreenRecorder
+import java.time.Duration
+import java.time.Instant
+import kotlin.time.ExperimentalTime
+import kotlin.time.measureTime
 
-fun main() = application {
-    configure {
-        width = 768
-        height = 576
-    }
+private fun Duration.render() = toString()
+    .substring(2)
+    .replace("(\\d[HMS])(?!$)", "$1 ")
+    .toLowerCase()
 
-    program {
-        val image = loadImage("data/images/pm5544.png")
-        val font = loadFont("data/fonts/default.otf", 64.0)
+@OptIn(ExperimentalTime::class)
+fun main() {
+    val start = Instant.now()
+    var lastMeasuredTime = start
+    var lastMeasuredFrames = 0
+    measureTime {
+        application {
+            configure {
+                width = 768
+                height = 576
+            }
 
-        extend {
-            drawer.drawStyle.colorMatrix = tint(ColorRGBa.WHITE.shade(0.2))
-            drawer.image(image)
+            val recorder = ScreenRecorder().apply {
+                frameRate = 60
+                maximumFrames = frameRate * 30L
+                outputFile = "output.mp4"
+            }
 
-            drawer.fill = ColorRGBa.PINK
-            drawer.circle(cos(seconds) * width / 2.0 + width / 2.0, sin(0.5 * seconds) * height / 2.0 + height / 2.0, 140.0)
-
-            drawer.fontMap = font
-            drawer.fill = ColorRGBa.WHITE
-            drawer.text("OPENRNDR", width / 2.0, height / 2.0)
+            program {
+                extend(recorder)
+                extend {
+                    drawLandscape()
+                    if (frameCount % 10 == 0 && frameCount != 0) {
+                        val now = Instant.now()
+                        val fps =
+                            (frameCount - lastMeasuredFrames) / ((now.toEpochMilli() - lastMeasuredTime.toEpochMilli()) / 1000.0)
+                        val totalElapsedTime = Duration.ofMillis(now.toEpochMilli() - start.toEpochMilli()).render()
+                        val timeLeft = when {
+                            fps == 0.0 -> "Infinity"
+                            frameCount.toLong() == recorder.maximumFrames -> "0"
+                            else -> Duration.ofSeconds(((recorder.maximumFrames - frameCount.toLong()) / fps).toLong())
+                                .render()
+                        }
+                        println("Frame $frameCount / ${recorder.maximumFrames} (${frameCount * 100 / recorder.maximumFrames}%). Elapsed time: ${totalElapsedTime}s. FPS: $fps. Time left: ${timeLeft}.")
+                        lastMeasuredTime = now
+                        lastMeasuredFrames = frameCount
+                    }
+                }
+            }
         }
-    }
+    }.let { println("Finished after: $it") }
 }
