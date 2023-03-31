@@ -15,23 +15,24 @@ fun Program.drawLandscape() {
     val random = Random(100)
     drawSky(random, 1000)
     val treeWidth = min(log2(seconds + 1).pow(2), 20.0)
-    val coef = atan(seconds / 30) / PI + 0.5
+    val offset = 2.0
+    val coef = atan((seconds + offset) / 30) / PI + 0.5
     val grassHeight = 100
     drawGrass(random, grassHeight, count = 10000)
 
     val bottomLeft = Vector2((width - treeWidth) / 2, height.toDouble() - grassHeight / 2)
     val bottomRight = Vector2((width + treeWidth) / 2, height.toDouble() - grassHeight / 2)
     drawFractalTree(
-        min(12, 1 + (seconds / 2).toInt()),
+        min(10, ((seconds + offset).pow(0.8)).toInt()),
         bottomLeft,
         bottomRight,
-        10 + 150.0 * coef,
-        0.15 + coef * 0.55
+        10 + 200.0 * coef,
+        0.15 + coef * 0.65
     )
     drawGrassForeground(1000, Random(1000), IntRectangle(0, bottomLeft.y.toInt(), width, 5))
 }
 
-private fun Program.generatePolygonTopPoints(polygon: StemRectangle): List<Vector2> {
+private fun Program.generatePolygon(polygon: StemRectangle): ShapeContour {
     val baseAngle = atan2(
         polygon.bottomRight.y - polygon.bottomLeft.y,
         polygon.bottomRight.x - polygon.bottomLeft.x
@@ -41,12 +42,15 @@ private fun Program.generatePolygonTopPoints(polygon: StemRectangle): List<Vecto
     val center = (polygon.bottomLeft + polygon.bottomRight) / 2.0
     val rotationMatrix = Matrix44.rotateZ(angle)
     val width = polygon.bottomLeft.distanceTo(polygon.bottomRight)
+    fun Vector2.rotated() = (rotationMatrix * xy01).xy + center
     val points = listOf(
-        Vector2(-width / 2, -polygon.height),
-        Vector2(additionalAngle, -width * 0.7 - polygon.height),
-        Vector2(+width / 2, -polygon.height)
+        polygon.bottomLeft,
+        Vector2(-width / 2, -polygon.height).rotated(),
+        Vector2(additionalAngle, -width * 0.7 - polygon.height).rotated(),
+        Vector2(+width / 2, -polygon.height).rotated(),
+        polygon.bottomRight,
     )
-    return points.map { (rotationMatrix * it.xy01).xy + center }
+    return ShapeContour.fromPoints(points, closed = true)
 }
 
 private fun Program.makeLeaf(p1: Vector2, p2: Vector2) {
@@ -65,15 +69,13 @@ private fun Program.drawSky(random: Random, starsCount: Int) {
 }
 
 fun Program.drawStars(random: Random, count: Int) {
-    val starPoints = Array(count) {
-        Vector2(
+    drawer.strokeWeight = 0.0
+    drawer.fill = ColorRGBa.LIGHT_YELLOW.opacify(max(0.0, -cos(seconds)))
+    repeat(count) {
+        val star = Vector2(
             random.nextDouble(drawer.width.toDouble()),
             random.nextDouble(drawer.height.toDouble())
         )
-    }
-    drawer.strokeWeight = 0.0
-    drawer.fill = ColorRGBa.LIGHT_YELLOW.opacify(max(0.0, -cos(seconds)))
-    for (star in starPoints) {
         drawer.circle(star, 1.0)
     }
 }
@@ -92,15 +94,12 @@ private fun Program.drawGrass(random: Random, grassHeight: Int, count: Int) {
 }
 
 private fun Program.drawGrassForeground(count: Int, random: Random, rectangle: IntRectangle) {
-    val grassStarts = Array(count) {
-        Vector2(
+    drawer.strokeWeight = 2.0
+    repeat(count) {
+        val grassStart = Vector2(
             random.nextDouble(rectangle.corner.x + rectangle.width.toDouble()),
             rectangle.corner.y + random.nextDouble(rectangle.height.toDouble())
         )
-    }
-
-    drawer.strokeWeight = 2.0
-    for (grassStart in grassStarts) {
         drawer.stroke = makeDayOrNight(ColorRGBa(0.0, random.nextDouble(100.0, 200.0) / 256, 0.0))
         val curHeight = random.nextDouble(3.0, 7.0)
         val additionalAngle = asin(sin(seconds / 3).let { abs(it).pow(0.5).withSign(it) }) / 3
@@ -133,37 +132,30 @@ private fun Program.drawSun() {
 private fun Double.toDegrees() = this * 180 / PI
 private data class StemRectangle(val bottomLeft: Vector2, val bottomRight: Vector2, val height: Double)
 
+@OptIn(ExperimentalStdlibApi::class)
 private fun Program.drawFractalTree(
     depth: Int, bottomLeft: Vector2, bottomRight: Vector2, height: Double, heightCoefficient: Double,
 ) {
-    val topPoints = generatePolygonTopPoints(StemRectangle(bottomLeft, bottomRight, height))
     drawer.strokeWeight = 0.0
     drawer.fill = makeDayOrNight(ColorRGBa.SADDLE_BROWN)
-    val topLeft = topPoints.first()
-    val topRight = topPoints.last()
-    val polygonPoints = object : AbstractList<Vector2>() {
-        override val size: Int = topPoints.size + 2
-
-        override fun get(index: Int): Vector2 = when (index) {
-            0 -> bottomLeft
-            lastIndex -> bottomRight
-            else -> topPoints[index - 1]
-        }
-    }
-    drawer.contour(ShapeContour.fromPoints(polygonPoints, closed = true))
+    val contour = generatePolygon(StemRectangle(bottomLeft, bottomRight, height))
+    val topLeft = contour.segments[0].end
+    val topRight = contour.segments[contour.segments.size - 2].start
+    drawer.contour(contour)
     drawer.strokeWeight = 2.0
     drawer.stroke = makeDayOrNight(ColorRGBa.MAROON)
     drawer.lineSegment(bottomLeft, topLeft)
     drawer.lineSegment(topRight, bottomRight)
     drawer.strokeWeight = 0.0
-    for ((p1, p2) in topPoints.zipWithNext()) {
-        if (depth == 0) {
-            makeLeaf(p1, p2)
-        } else {
+    if (depth == 0) {
+        makeLeaf(topLeft, topRight)
+    } else {
+        for (index in 1..<(contour.segments.size - 2)) {
+            val segment = contour.segments[index]
             drawFractalTree(
                 depth = depth - 1,
-                bottomLeft = p1,
-                bottomRight = p2,
+                bottomLeft = segment.start,
+                bottomRight = segment.end,
                 height = height * heightCoefficient,
                 heightCoefficient = heightCoefficient,
             )
